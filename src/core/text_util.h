@@ -16,6 +16,9 @@ std::string PromptLine(const std::string& prompt,
 std::string FormatTimestamp(std::int64_t timestamp);
 std::string OneLine(std::string value);
 std::string Clip(std::string value, std::size_t max_size);
+std::size_t DisplayWidth(const std::string& value);
+std::string PadRight(const std::string& value, std::size_t width);
+std::string ClipDisplay(std::string value, std::size_t max_width);
 std::string JsonEscape(const std::string& value);
 
 }  // namespace tg_tools

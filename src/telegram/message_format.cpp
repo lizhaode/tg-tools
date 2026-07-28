@@ -1,7 +1,7 @@
 #include "telegram/message_format.h"
 
+#include <cstddef>
 #include <filesystem>
-#include <iomanip>
 #include <iostream>
 #include <ostream>
 
@@ -11,6 +11,13 @@ namespace tg_tools {
 namespace {
 
 namespace td_api = td::td_api;
+
+constexpr std::size_t kMessageIdColumnWidth = 14;
+constexpr std::size_t kDateColumnWidth = 17;
+constexpr std::size_t kTypeColumnWidth = 10;
+constexpr std::size_t kFileColumnWidth = 124;
+constexpr std::size_t kFileClipWidth = 120;
+constexpr std::size_t kTextClipWidth = 120;
 
 struct MessageRow {
   std::string type;
@@ -157,17 +164,20 @@ std::optional<VideoFile> ExtractVideoFile(const td_api::message& message) {
 }
 
 void PrintMessageHeader() {
-  std::cout << std::left << std::setw(14) << "message_id" << std::setw(17)
-            << "date" << std::setw(10) << "type" << std::setw(124) << "file"
-            << "text" << '\n';
+  std::cout << PadRight("message_id", kMessageIdColumnWidth)
+            << PadRight("date", kDateColumnWidth)
+            << PadRight("type", kTypeColumnWidth)
+            << PadRight("file", kFileColumnWidth) << "text\n";
 }
 
 void PrintMessageRow(const td_api::message& message) {
   const MessageRow row = DescribeMessage(message);
-  std::cout << std::left << std::setw(14) << message.id_ << std::setw(17)
-            << FormatTimestamp(message.date_) << std::setw(10) << row.type
-            << std::setw(124) << Clip(row.file_name, 120) << Clip(row.text, 120)
-            << '\n';
+  const std::string file_name = ClipDisplay(row.file_name, kFileClipWidth);
+  std::cout << PadRight(std::to_string(message.id_), kMessageIdColumnWidth)
+            << PadRight(FormatTimestamp(message.date_), kDateColumnWidth)
+            << PadRight(row.type, kTypeColumnWidth)
+            << PadRight(file_name, kFileColumnWidth)
+            << ClipDisplay(row.text, kTextClipWidth) << '\n';
 }
 
 void WriteMessageJson(std::ostream& output, const td_api::message& message) {

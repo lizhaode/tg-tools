@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <td/telegram/td_api.h>
 #include <td/telegram/td_api.hpp>
@@ -18,6 +19,36 @@ namespace tg_tools {
 namespace {
 
 namespace td_api = td::td_api;
+
+struct ChatRow {
+  std::string chat_id;
+  std::string type;
+  std::string title;
+};
+
+void PrintChatRows(const std::vector<ChatRow>& rows) {
+  std::size_t chat_id_width = DisplayWidth("chat_id");
+  std::size_t type_width = DisplayWidth("type");
+  for (const ChatRow& row : rows) {
+    const std::size_t row_chat_id_width = DisplayWidth(row.chat_id);
+    const std::size_t row_type_width = DisplayWidth(row.type);
+    if (row_chat_id_width > chat_id_width) {
+      chat_id_width = row_chat_id_width;
+    }
+    if (row_type_width > type_width) {
+      type_width = row_type_width;
+    }
+  }
+  chat_id_width += 2;
+  type_width += 2;
+
+  std::cout << PadRight("chat_id", chat_id_width)
+            << PadRight("type", type_width) << "title\n";
+  for (const ChatRow& row : rows) {
+    std::cout << PadRight(row.chat_id, chat_id_width)
+              << PadRight(row.type, type_width) << row.title << '\n';
+  }
+}
 
 bool PrintChats(TelegramClient* client, int limit, std::string* error) {
   if (client == nullptr) {
@@ -32,7 +63,8 @@ bool PrintChats(TelegramClient* client, int limit, std::string* error) {
   }
   auto chats = td::move_tl_object_as<td_api::chats>(std::move(result));
 
-  std::cout << "chat_id\ttype\ttitle\n";
+  std::vector<ChatRow> rows;
+  rows.reserve(chats->chat_ids_.size());
   for (const auto chat_id : chats->chat_ids_) {
     auto chat_object =
         client->Request(td_api::make_object<td_api::getChat>(chat_id),
@@ -41,9 +73,10 @@ bool PrintChats(TelegramClient* client, int limit, std::string* error) {
       return false;
     }
     auto chat = td::move_tl_object_as<td_api::chat>(std::move(chat_object));
-    std::cout << chat->id_ << '\t' << ChatTypeLabel(*chat) << '\t'
-              << chat->title_ << '\n';
+    rows.push_back(ChatRow{std::to_string(chat->id_), ChatTypeLabel(*chat),
+                           OneLine(chat->title_)});
   }
+  PrintChatRows(rows);
   return true;
 }
 
