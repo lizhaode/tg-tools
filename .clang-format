@@ -1,0 +1,21 @@
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+ColumnLimit: 80
+DerivePointerAlignment: false
+PointerAlignment: Left
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<[^/.]+\.h>'
+    Priority: 1
+  - Regex: '^<(algorithm|charconv|chrono|cctype|cstddef|cstdint|cstdlib|ctime|exception|filesystem|fstream|iomanip|iosfwd|iostream|limits|map|memory|optional|ostream|sstream|stdexcept|string|system_error|utility|vector)>$'
+    Priority: 2
+  - Regex: '^<td/'
+    Priority: 3
+  - Regex: '^<[^>]+>'
+    Priority: 4
+  - Regex: '^"[^"]+"'
+    Priority: 5
+IndentWidth: 2
+ContinuationIndentWidth: 4
