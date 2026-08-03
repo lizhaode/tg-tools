@@ -1,14 +1,17 @@
 #include "commands/upload_json.h"
 
-#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <utility>
+
+#include <nlohmann/json.hpp>
 
 #include "core/text_util.h"
 
 namespace tg_tools {
 namespace {
+
+using Json = nlohmann::json;
 
 bool ReadTextFile(const std::filesystem::path& path, std::string* text,
                   std::string* error) {
@@ -25,114 +28,34 @@ bool ReadTextFile(const std::filesystem::path& path, std::string* text,
   return true;
 }
 
-void SkipJsonSpace(const std::string& text, std::size_t& index) {
-  while (index < text.size() &&
-         std::isspace(static_cast<unsigned char>(text[index]))) {
-    ++index;
-  }
-}
-
-bool ParseJsonStringValue(const std::string& text, std::size_t* index,
-                          std::string* value, std::string* error) {
-  if (index == nullptr || value == nullptr) {
-    return SetError(error, "内部错误：JSON 字符串输出指针为空");
-  }
-  value->clear();
-  SkipJsonSpace(text, *index);
-  if (*index >= text.size() || text[*index] != '"') {
-    return SetError(error, "JSON 需要字符串值");
-  }
-  ++(*index);
-
-  while (*index < text.size()) {
-    const char character = text[(*index)++];
-    if (character == '"') {
-      return true;
-    }
-    if (character != '\\') {
-      value->push_back(character);
-      continue;
-    }
-    if (*index >= text.size()) {
-      return SetError(error, "JSON 转义不完整");
-    }
-    const char escaped = text[(*index)++];
-    switch (escaped) {
-      case '"':
-        value->push_back('"');
-        break;
-      case '\\':
-        value->push_back('\\');
-        break;
-      case 'n':
-        value->push_back('\n');
-        break;
-      case 'r':
-        value->push_back('\r');
-        break;
-      case 't':
-        value->push_back('\t');
-        break;
-      default:
-        value->push_back(escaped);
-        break;
-    }
-  }
-  return SetError(error, "JSON 字符串未结束");
-}
-
-bool ParseUploadObject(const std::string& text, std::size_t* index,
-                       UploadItem* item, std::string* error) {
-  if (index == nullptr || item == nullptr) {
+bool ParseUploadObject(const Json& object, std::size_t index, UploadItem* item,
+                       std::string* error) {
+  if (item == nullptr) {
     return SetError(error, "内部错误：上传对象输出指针为空");
   }
-  SkipJsonSpace(text, *index);
-  if (*index >= text.size() || text[*index] != '{') {
-    return SetError(error, "上传 JSON 项必须是对象");
+  if (!object.is_object()) {
+    return SetError(
+        error, "上传 JSON 第 " + std::to_string(index + 1) + " 项必须是对象");
   }
-  ++(*index);
+  if (!object.contains("name")) {
+    return SetError(
+        error, "上传 JSON 第 " + std::to_string(index + 1) + " 项缺少 name");
+  }
+  if (!object.at("name").is_string()) {
+    return SetError(error, "上传 JSON 第 " + std::to_string(index + 1) +
+                               " 项的 name 必须是字符串");
+  }
+  if (object.contains("caption") && !object.at("caption").is_string()) {
+    return SetError(error, "上传 JSON 第 " + std::to_string(index + 1) +
+                               " 项的 caption 必须是字符串");
+  }
+
   *item = UploadItem{};
-  while (true) {
-    SkipJsonSpace(text, *index);
-    if (*index < text.size() && text[*index] == '}') {
-      ++(*index);
-      break;
-    }
-
-    std::string key;
-    if (!ParseJsonStringValue(text, index, &key, error)) {
-      return false;
-    }
-    SkipJsonSpace(text, *index);
-    if (*index >= text.size() || text[*index] != ':') {
-      return SetError(error, "上传 JSON 对象缺少 ':'");
-    }
-    ++(*index);
-    std::string value;
-    if (!ParseJsonStringValue(text, index, &value, error)) {
-      return false;
-    }
-
-    if (key == "name") {
-      item->name = value;
-    } else if (key == "caption") {
-      item->caption = value;
-    }
-
-    SkipJsonSpace(text, *index);
-    if (*index < text.size() && text[*index] == ',') {
-      ++(*index);
-      continue;
-    }
-    if (*index < text.size() && text[*index] == '}') {
-      ++(*index);
-      break;
-    }
-    return SetError(error, "上传 JSON 对象缺少 ',' 或 '}'");
-  }
-
+  item->name = object.at("name").get<std::string>();
+  item->caption = object.value("caption", "");
   if (item->name.empty()) {
-    return SetError(error, "上传 JSON 对象缺少 name");
+    return SetError(error, "上传 JSON 第 " + std::to_string(index + 1) +
+                               " 项的 name 不能为空");
   }
   return true;
 }
@@ -148,30 +71,23 @@ bool ParseUploadJsonFile(const std::filesystem::path& path,
   if (!ReadTextFile(path, &text, error)) {
     return false;
   }
-  std::size_t index = 0;
-  items->clear();
-  SkipJsonSpace(text, index);
 
-  if (index >= text.size() || text[index] != '[') {
+  Json root = Json::parse(text, nullptr, false);
+  if (root.is_discarded()) {
+    return SetError(error, "上传 JSON 解析失败：文件内容不是有效 JSON");
+  }
+
+  if (!root.is_array()) {
     return SetError(error, "上传 JSON 必须是数组");
   }
-  ++index;
 
-  while (true) {
-    SkipJsonSpace(text, index);
-    if (index < text.size() && text[index] == ']') {
-      ++index;
-      break;
-    }
+  items->clear();
+  for (std::size_t index = 0; index < root.size(); ++index) {
     UploadItem item;
-    if (!ParseUploadObject(text, &index, &item, error)) {
+    if (!ParseUploadObject(root[index], index, &item, error)) {
       return false;
     }
     items->push_back(std::move(item));
-    SkipJsonSpace(text, index);
-    if (index < text.size() && text[index] == ',') {
-      ++index;
-    }
   }
 
   if (items->empty()) {

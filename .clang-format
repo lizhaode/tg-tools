@@ -9,7 +9,7 @@ IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^<[^/.]+\.h>'
     Priority: 1
-  - Regex: '^<(algorithm|charconv|chrono|cctype|cstddef|cstdint|cstdlib|ctime|exception|filesystem|fstream|iomanip|iosfwd|iostream|limits|map|memory|optional|ostream|sstream|stdexcept|string|system_error|utility|vector)>$'
+  - Regex: '^<(algorithm|charconv|chrono|cctype|cstddef|cstdint|cstdlib|ctime|exception|filesystem|fstream|iomanip|iosfwd|iostream|limits|map|memory|optional|ostream|set|sstream|stdexcept|string|system_error|utility|vector)>$'
     Priority: 2
   - Regex: '^<td/'
     Priority: 3

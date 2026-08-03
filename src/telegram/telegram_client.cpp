@@ -93,8 +93,10 @@ td::ClientManager::Response TelegramClient::Receive(double timeout_seconds) {
   return client_manager_->receive(timeout_seconds);
 }
 
-void TelegramClient::Send(Function function) {
-  client_manager_->send(client_id_, next_query_id_++, std::move(function));
+std::uint64_t TelegramClient::Send(Function function) {
+  const auto request_id = next_query_id_++;
+  client_manager_->send(client_id_, request_id, std::move(function));
+  return request_id;
 }
 
 bool TelegramClient::ConfigureProxyFromEnvironment(std::string* error) {
@@ -110,7 +112,7 @@ bool TelegramClient::ConfigureProxyFromEnvironment(std::string* error) {
   auto proxy = td_api::make_object<td_api::proxy>(
       proxy_config->server, proxy_config->port, std::move(proxy_type));
   Send(td_api::make_object<td_api::addProxy>(std::move(proxy), true, ""));
-  std::cout << "已启用代理：http://" << proxy_config->server << ':'
+  std::cout << "已启用代理：http://" << OneLine(proxy_config->server) << ':'
             << proxy_config->port << '\n';
   return true;
 }
@@ -192,7 +194,7 @@ bool TelegramClient::OnAuthorizationStateUpdate(std::string* error) {
           },
           [](td_api::authorizationStateWaitOtherDeviceConfirmation& state) {
             std::cout << "请在另一个已登录的 Telegram 客户端确认登录："
-                      << state.link_ << '\n';
+                      << OneLine(state.link_) << '\n';
           },
           [&](td_api::authorizationStateWaitRegistration&) {
             ok = SetError(

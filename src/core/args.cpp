@@ -1,34 +1,8 @@
 #include "core/args.h"
 
-#include <charconv>
-#include <system_error>
-#include <utility>
+#include "core/text_util.h"
 
 namespace tg_tools {
-namespace {
-
-bool SetError(std::string* error, std::string message) {
-  if (error != nullptr) {
-    *error = std::move(message);
-  }
-  return false;
-}
-
-bool ParseIntText(const std::string& text, int* value) {
-  const char* begin = text.data();
-  const char* end = text.data() + text.size();
-  const auto result = std::from_chars(begin, end, *value);
-  return result.ec == std::errc() && result.ptr == end;
-}
-
-bool ParseInt64Text(const std::string& text, std::int64_t* value) {
-  const char* begin = text.data();
-  const char* end = text.data() + text.size();
-  const auto result = std::from_chars(begin, end, *value);
-  return result.ec == std::errc() && result.ptr == end;
-}
-
-}  // namespace
 
 ParsedArgs ParseArgs(int argc, char** argv) {
   ParsedArgs args;
@@ -76,9 +50,12 @@ bool ParseOptionalIntOption(const ParsedArgs& args, const std::string& key,
   if (value == nullptr) {
     return SetError(error, "内部错误：参数输出指针为空");
   }
-  if (iterator == args.options.end() || iterator->second.empty()) {
+  if (iterator == args.options.end()) {
     value->reset();
     return true;
+  }
+  if (iterator->second.empty()) {
+    return SetError(error, "参数 --" + key + " 必须是整数");
   }
 
   int parsed_value = 0;

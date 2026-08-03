@@ -157,12 +157,28 @@ std::string FormatTimestamp(std::int64_t timestamp) {
 }
 
 std::string OneLine(std::string value) {
-  for (char& character : value) {
-    if (character == '\n' || character == '\r' || character == '\t') {
-      character = ' ';
+  std::string output;
+  output.reserve(value.size());
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    const unsigned char character = static_cast<unsigned char>(value[index]);
+    if (character < 0x20 || character == 0x7F ||
+        (character >= 0x80 && character <= 0x9F)) {
+      output.push_back(' ');
+      continue;
     }
+
+    if (character == 0xC2 && index + 1 < value.size()) {
+      const unsigned char next = static_cast<unsigned char>(value[index + 1]);
+      if (next >= 0x80 && next <= 0x9F) {
+        output.push_back(' ');
+        ++index;
+        continue;
+      }
+    }
+
+    output.push_back(static_cast<char>(character));
   }
-  return value;
+  return output;
 }
 
 std::string Clip(std::string value, std::size_t max_size) {

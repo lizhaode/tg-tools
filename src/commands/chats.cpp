@@ -115,6 +115,9 @@ bool RunChatsCommand(TelegramClient* client, const ParsedArgs& args,
     return false;
   }
   if (limit) {
+    if (*limit <= 0) {
+      return SetError(error, "参数 --limit 必须是正整数");
+    }
     return PrintChats(client, *limit, error);
   }
 

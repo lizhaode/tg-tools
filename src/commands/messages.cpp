@@ -4,8 +4,10 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <td/telegram/td_api.h>
 #include <td/telegram/td_api.hpp>
@@ -17,6 +19,30 @@ namespace tg_tools {
 namespace {
 
 namespace td_api = td::td_api;
+
+bool WriteMessagesJson(
+    const std::string& path,
+    const std::vector<td_api::object_ptr<td_api::message>>& messages,
+    std::string* error) {
+  std::ofstream output(path);
+  if (!output) {
+    return SetError(error, "无法打开 JSON 输出文件：" + path);
+  }
+
+  output << "[\n";
+  for (std::size_t index = 0; index < messages.size(); ++index) {
+    if (index > 0) {
+      output << ",\n";
+    }
+    WriteMessageJson(output, *messages[index]);
+  }
+  output << "\n]\n";
+  output.close();
+  if (!output) {
+    return SetError(error, "写入 JSON 输出文件失败：" + path);
+  }
+  return true;
+}
 
 }  // namespace
 
@@ -34,19 +60,17 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
   if (!ParseOptionalIntOption(args, "limit", &limit, error)) {
     return false;
   }
+  if (limit && *limit <= 0) {
+    return SetError(error, "参数 --limit 必须是正整数");
+  }
   const std::string json_path = ParseStringOption(args, "json", "");
-  std::ofstream json_output;
+  const bool write_json = !json_path.empty();
+  std::vector<td_api::object_ptr<td_api::message>> json_messages;
   std::int64_t from_message_id = 0;
   int printed = 0;
 
-  if (json_path.empty()) {
+  if (!write_json) {
     PrintMessageHeader();
-  } else {
-    json_output.open(json_path);
-    if (!json_output) {
-      return SetError(error, "无法打开 JSON 输出文件：" + json_path);
-    }
-    json_output << "[\n";
   }
 
   while (!limit || printed < *limit) {
@@ -63,13 +87,10 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
       break;
     }
 
-    for (const auto& message : messages->messages_) {
+    for (auto& message : messages->messages_) {
       from_message_id = message->id_;
-      if (json_output) {
-        if (printed > 0) {
-          json_output << ",\n";
-        }
-        WriteMessageJson(json_output, *message);
+      if (write_json) {
+        json_messages.push_back(std::move(message));
       } else {
         PrintMessageRow(*message);
       }
@@ -80,8 +101,8 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
     }
   }
 
-  if (json_output) {
-    json_output << "\n]\n";
+  if (write_json) {
+    return WriteMessagesJson(json_path, json_messages, error);
   }
   return true;
 }

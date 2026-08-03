@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_MESSAGE_FORMAT_H_
-#define TG_TOOLS_SRC_MESSAGE_FORMAT_H_
+#ifndef TG_TOOLS_SRC_TELEGRAM_MESSAGE_FORMAT_H_
+#define TG_TOOLS_SRC_TELEGRAM_MESSAGE_FORMAT_H_
 
 #include <cstdint>
 #include <iosfwd>
@@ -25,4 +25,4 @@ std::string SafeFileName(const VideoFile& video, std::int64_t message_id);
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_MESSAGE_FORMAT_H_
+#endif  // TG_TOOLS_SRC_TELEGRAM_MESSAGE_FORMAT_H_

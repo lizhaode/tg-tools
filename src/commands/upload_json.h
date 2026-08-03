@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_UPLOAD_JSON_H_
-#define TG_TOOLS_SRC_UPLOAD_JSON_H_
+#ifndef TG_TOOLS_SRC_COMMANDS_UPLOAD_JSON_H_
+#define TG_TOOLS_SRC_COMMANDS_UPLOAD_JSON_H_
 
 #include <filesystem>
 #include <string>
@@ -17,4 +17,4 @@ bool ParseUploadJsonFile(const std::filesystem::path& path,
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_UPLOAD_JSON_H_
+#endif  // TG_TOOLS_SRC_COMMANDS_UPLOAD_JSON_H_

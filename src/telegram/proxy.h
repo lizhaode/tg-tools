@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_PROXY_H_
-#define TG_TOOLS_SRC_PROXY_H_
+#ifndef TG_TOOLS_SRC_TELEGRAM_PROXY_H_
+#define TG_TOOLS_SRC_TELEGRAM_PROXY_H_
 
 #include <optional>
 #include <string>
@@ -18,4 +18,4 @@ bool ProxyFromEnvironment(std::optional<ProxyConfig>* proxy_config,
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_PROXY_H_
+#endif  // TG_TOOLS_SRC_TELEGRAM_PROXY_H_

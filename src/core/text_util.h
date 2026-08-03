@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_TEXT_UTIL_H_
-#define TG_TOOLS_SRC_TEXT_UTIL_H_
+#ifndef TG_TOOLS_SRC_CORE_TEXT_UTIL_H_
+#define TG_TOOLS_SRC_CORE_TEXT_UTIL_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -23,4 +23,4 @@ std::string JsonEscape(const std::string& value);
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_TEXT_UTIL_H_
+#endif  // TG_TOOLS_SRC_CORE_TEXT_UTIL_H_

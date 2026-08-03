@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_ARGS_H_
-#define TG_TOOLS_SRC_ARGS_H_
+#ifndef TG_TOOLS_SRC_CORE_ARGS_H_
+#define TG_TOOLS_SRC_CORE_ARGS_H_
 
 #include <cstdint>
 #include <map>
@@ -26,4 +26,4 @@ std::string ParseStringOption(const ParsedArgs& args, const std::string& key,
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_ARGS_H_
+#endif  // TG_TOOLS_SRC_CORE_ARGS_H_

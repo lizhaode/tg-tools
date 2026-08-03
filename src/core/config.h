@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_CONFIG_H_
-#define TG_TOOLS_SRC_CONFIG_H_
+#ifndef TG_TOOLS_SRC_CORE_CONFIG_H_
+#define TG_TOOLS_SRC_CORE_CONFIG_H_
 
 #include <filesystem>
 #include <string>
@@ -12,7 +12,7 @@ struct Config {
   std::string phone_number;
   std::string database_directory = "tdlib-db";
   std::string files_directory = "tdlib-files";
-  std::string database_encryption_key = "tgvideoclikey";
+  std::string database_encryption_key;
   std::string system_language_code = "zh-CN";
   std::string device_model = "CLI";
   std::string system_version;
@@ -25,4 +25,4 @@ bool ValidateConfig(const Config& config, std::string* error);
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_CONFIG_H_
+#endif  // TG_TOOLS_SRC_CORE_CONFIG_H_

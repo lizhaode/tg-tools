@@ -1,5 +1,5 @@
-#ifndef TG_TOOLS_SRC_TELEGRAM_CLIENT_H_
-#define TG_TOOLS_SRC_TELEGRAM_CLIENT_H_
+#ifndef TG_TOOLS_SRC_TELEGRAM_TELEGRAM_CLIENT_H_
+#define TG_TOOLS_SRC_TELEGRAM_TELEGRAM_CLIENT_H_
 
 #include <chrono>
 #include <cstdint>
@@ -25,7 +25,7 @@ class TelegramClient {
   Object Request(Function function, std::chrono::seconds timeout,
                  std::string* error, bool allow_error = false);
   td::ClientManager::Response Receive(double timeout_seconds);
-  void Send(Function function);
+  std::uint64_t Send(Function function);
 
  private:
   bool ConfigureProxyFromEnvironment(std::string* error);
@@ -46,4 +46,4 @@ class TelegramClient {
 
 }  // namespace tg_tools
 
-#endif  // TG_TOOLS_SRC_TELEGRAM_CLIENT_H_
+#endif  // TG_TOOLS_SRC_TELEGRAM_TELEGRAM_CLIENT_H_
