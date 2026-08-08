@@ -16,7 +16,7 @@ struct VideoFile {
   std::string mime_type;
 };
 
-std::string ChatTypeLabel(const td::td_api::chat& chat);
+std::string ChatTypeName(const td::td_api::chat& chat);
 std::optional<VideoFile> ExtractVideoFile(const td::td_api::message& message);
 void PrintMessageHeader();
 void PrintMessageRow(const td::td_api::message& message);

@@ -156,13 +156,24 @@ std::string FormatTimestamp(std::int64_t timestamp) {
   return buffer;
 }
 
+std::string FormatSize(std::int64_t size) {
+  constexpr std::int64_t ki_b = 1024;
+  constexpr std::int64_t mi_b = 1024 * ki_b;
+  if (size >= mi_b) {
+    return std::to_string(size / mi_b) + " MiB";
+  }
+  if (size >= ki_b) {
+    return std::to_string(size / ki_b) + " KiB";
+  }
+  return std::to_string(size) + " B";
+}
+
 std::string OneLine(std::string value) {
   std::string output;
   output.reserve(value.size());
   for (std::size_t index = 0; index < value.size(); ++index) {
     const unsigned char character = static_cast<unsigned char>(value[index]);
-    if (character < 0x20 || character == 0x7F ||
-        (character >= 0x80 && character <= 0x9F)) {
+    if (character < 0x20 || character == 0x7F) {
       output.push_back(' ');
       continue;
     }
@@ -208,6 +219,14 @@ std::string PadRight(const std::string& value, std::size_t width) {
     return value;
   }
   return value + std::string(width - current_width, ' ');
+}
+
+std::string PadLeft(const std::string& value, std::size_t width) {
+  const std::size_t current_width = DisplayWidth(value);
+  if (current_width >= width) {
+    return value;
+  }
+  return std::string(width - current_width, ' ') + value;
 }
 
 std::string ClipDisplay(std::string value, std::size_t max_width) {

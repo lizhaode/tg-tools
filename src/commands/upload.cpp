@@ -32,7 +32,7 @@ struct UploadFailure {
   std::string reason;
 };
 
-enum class UploadState {
+enum class UploadState : std::uint8_t {
   kQueued,
   kWaiting,
   kSucceeded,
@@ -47,7 +47,7 @@ struct UploadTask {
   std::int32_t file_id = 0;
   int last_reported_percent = 0;
   std::int64_t last_uploaded_size = 0;
-  std::chrono::steady_clock::time_point last_progress_time;
+  std::chrono::steady_clock::time_point last_progress_time{};
 };
 
 struct UploadProgress {
@@ -65,18 +65,6 @@ struct PendingSendResult {
 bool IsRegularFile(const std::filesystem::path& path) {
   std::error_code error;
   return std::filesystem::is_regular_file(path, error) && !error;
-}
-
-std::string FormatSize(std::int64_t size) {
-  constexpr std::int64_t kKiB = 1024;
-  constexpr std::int64_t kMiB = 1024 * kKiB;
-  if (size >= kMiB) {
-    return std::to_string(size / kMiB) + " MiB";
-  }
-  if (size >= kKiB) {
-    return std::to_string(size / kKiB) + " KiB";
-  }
-  return std::to_string(size) + " B";
 }
 
 std::int32_t ExtractUploadedFileId(const td_api::message& message) {
@@ -520,7 +508,7 @@ bool ValidateNoDuplicatePaths(const std::vector<UploadItem>& items,
       normalized = std::filesystem::absolute(item.name, normalize_error);
     }
     if (!seen_paths.insert(normalized).second) {
-      return SetError(error, "上传列表中存在重复文件：" + item.name);
+      return SetError(error, "上传列表中存在重复文件：" + item.name.string());
     }
   }
   return true;

@@ -42,11 +42,11 @@ void PrintChatRows(const std::vector<ChatRow>& rows) {
   chat_id_width += 2;
   type_width += 2;
 
-  std::cout << PadRight("chat_id", chat_id_width)
-            << PadRight("type", type_width) << "title\n";
+  std::cout << PadLeft("chat_id", chat_id_width) << ' '
+            << PadRight("type", type_width) << " title\n";
   for (const ChatRow& row : rows) {
-    std::cout << PadRight(row.chat_id, chat_id_width)
-              << PadRight(row.type, type_width) << row.title << '\n';
+    std::cout << PadLeft(row.chat_id, chat_id_width) << ' '
+              << PadRight(row.type, type_width) << ' ' << row.title << '\n';
   }
 }
 
@@ -73,7 +73,7 @@ bool PrintChats(TelegramClient* client, int limit, std::string* error) {
       return false;
     }
     auto chat = td::move_tl_object_as<td_api::chat>(std::move(chat_object));
-    rows.push_back(ChatRow{std::to_string(chat->id_), ChatTypeLabel(*chat),
+    rows.push_back(ChatRow{std::to_string(chat->id_), ChatTypeName(*chat),
                            OneLine(chat->title_)});
   }
   PrintChatRows(rows);

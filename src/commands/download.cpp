@@ -1,5 +1,6 @@
 #include "commands/download.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -37,6 +38,7 @@ struct PendingDownload {
 struct ActiveDownload {
   PendingDownload pending;
   std::int64_t downloaded_size = -1;
+  int last_reported_percent = 0;
   std::chrono::steady_clock::time_point last_progress_time;
 };
 
@@ -229,7 +231,7 @@ class BatchDownloadRunner {
     while (active_ < kDownloadParallel && next_index_ < videos_.size()) {
       const DownloadTask& task = videos_[next_index_];
       pending_by_file_id_[task.video.file_id] =
-          ActiveDownload{task.pending, -1, std::chrono::steady_clock::now()};
+          ActiveDownload{task.pending, -1, 0, std::chrono::steady_clock::now()};
       const std::uint64_t request_id =
           client_->Send(td_api::make_object<td_api::downloadFile>(
               task.video.file_id, 32, 0, 0, false));
@@ -261,6 +263,7 @@ class BatchDownloadRunner {
     if (file.local_->downloaded_size_ > active_download.downloaded_size) {
       active_download.downloaded_size = file.local_->downloaded_size_;
       active_download.last_progress_time = std::chrono::steady_clock::now();
+      ReportProgress(file, active_download);
     }
     if (!file.local_->is_downloading_completed_) {
       return;
@@ -278,6 +281,31 @@ class BatchDownloadRunner {
     pending_by_file_id_.erase(pending);
     --active_;
     StartNext();
+  }
+
+  void ReportProgress(const td_api::file& file, ActiveDownload& download) {
+    const std::int64_t total_size =
+        file.size_ > 0 ? file.size_ : file.expected_size_;
+    if (total_size <= 0) {
+      return;
+    }
+    const std::int64_t downloaded_size =
+        std::min(download.downloaded_size, total_size);
+    int percent = static_cast<int>(downloaded_size * 100 / total_size);
+    if (file.local_->is_downloading_completed_) {
+      percent = 100;
+    }
+    if (percent < 100 && percent < download.last_reported_percent + 5) {
+      return;
+    }
+    if (percent <= download.last_reported_percent) {
+      return;
+    }
+    download.last_reported_percent = percent;
+    std::cout << "下载进度："
+              << OneLine(download.pending.destination.filename().string())
+              << ' ' << percent << "% (" << FormatSize(downloaded_size) << "/"
+              << FormatSize(total_size) << ")\n";
   }
 
   void SaveCompletedFile(const td_api::file& file,

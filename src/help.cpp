@@ -95,6 +95,7 @@ bool PrintCommandHelp(const std::string& command) {
 要求：
   单条下载：使用 --message；--out 可以是目录或完整文件路径。
   批量下载：使用 --messages；--out 必须是目录。
+  下载时会显示进度（每 5% 更新一次）；最多同时下载 3 个视频。
 )";
     return true;
   }

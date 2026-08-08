@@ -22,6 +22,7 @@ tg-tools 支持查看 Telegram 聊天消息、下载消息里的视频，以及�
 
 ```bash
 clang-format -i $(find src -name '*.cpp' -o -name '*.h')
+for f in $(find src -name '*.cpp'); do clang-tidy -p build -quiet "$f"; done
 ```
 
 注意：

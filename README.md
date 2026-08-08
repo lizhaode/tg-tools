@@ -98,15 +98,15 @@ cp build/tg-tools ~/tg-tools/
 | 字段 | 说明 |
 | --- | --- |
 | `chat_id` | 聊天 ID，后续命令都需要用它指定聊天或频道 |
-| `type` | 聊天类型，例如 `private`、`basic_group`、`supergroup`、`channel`、`secret` |
+| `type` | TDLib 原始类型名，例如 `chatTypePrivate`、`chatTypeBasicGroup`、`chatTypeSupergroup`、`chatTypeSecret`（channel 与 supergroup 同为 `chatTypeSupergroup`，不再区分） |
 | `title` | 聊天标题 |
 
 输出类似：
 
 ```text
-chat_id          type          title
--1001234567890   channel       My Channel
-123456789        private       Alice
+chat_id            type               title
+-1001234567890     chatTypeSupergroup My Channel
+123456789          chatTypePrivate    Alice
 ```
 
 示例：
@@ -135,7 +135,7 @@ chat_id          type          title
 | --- | --- |
 | `message_id` | 消息 ID，下载时通过它指定具体消息 |
 | `date` | 消息时间 |
-| `type` | 消息类型，例如 `video` |
+| `type` | TDLib 原始类型名，例如 `messageVideo`、`messageText` |
 | `file` | 文件名或文件信息 |
 | `text` | 消息文本或视频说明 |
 
@@ -143,8 +143,8 @@ chat_id          type          title
 
 | message_id | date | type | file | text |
 | --- | --- | --- | --- | --- |
-| `12345` | `2026-07-28 12:00` | `video` | `video.mp4` | `caption` |
-| `12346` | `2026-07-28 12:03` | `text` | | `hello` |
+| `12345` | `2026-07-28 12:00` | `messageVideo` | `video.mp4` | `caption` |
+| `12346` | `2026-07-28 12:03` | `messageText` | | `hello` |
 
 示例：
 
@@ -161,7 +161,7 @@ chat_id          type          title
 		"message_id": 12345,
 		"date": 1785235200,
 		"date_text": "2026-07-28 12:00",
-		"type": "video",
+		"type": "messageVideo",
 		"file_id": 654321,
 		"file_name": "video.mp4",
 		"mime_type": "video/mp4",
