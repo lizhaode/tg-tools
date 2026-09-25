@@ -80,32 +80,6 @@ bool PrintChats(TelegramClient* client, int limit, std::string* error) {
   return true;
 }
 
-bool LoadAllChats(TelegramClient* client, std::string* error) {
-  if (client == nullptr) {
-    return SetError(error, "内部错误：Telegram client 为空");
-  }
-
-  while (true) {
-    auto result =
-        client->Request(td_api::make_object<td_api::loadChats>(nullptr, 100),
-                        std::chrono::seconds(60), error, true);
-    if (!result) {
-      return false;
-    }
-    if (result->get_id() == td_api::ok::ID) {
-      continue;
-    }
-    if (result->get_id() == td_api::error::ID) {
-      const auto& td_error = static_cast<const td_api::error&>(*result);
-      if (td_error.code_ == 404) {
-        return true;
-      }
-      return SetError(error, "TDLib error " + std::to_string(td_error.code_) +
-                                 ": " + td_error.message_);
-    }
-  }
-}
-
 }  // namespace
 
 bool RunChatsCommand(TelegramClient* client, const ParsedArgs& args,
@@ -121,7 +95,7 @@ bool RunChatsCommand(TelegramClient* client, const ParsedArgs& args,
     return PrintChats(client, *limit, error);
   }
 
-  if (!LoadAllChats(client, error)) {
+  if (!client->LoadAllChats(error)) {
     return false;
   }
   return PrintChats(client, std::numeric_limits<std::int32_t>::max(), error);

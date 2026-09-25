@@ -14,7 +14,6 @@
 #include "commands/chats.h"
 #include "commands/download.h"
 #include "commands/messages.h"
-#include "commands/upload.h"
 #include "core/args.h"
 #include "core/config.h"
 #include "core/text_util.h"
@@ -82,11 +81,9 @@ bool ValidateCommandArgs(const std::string& command, const ParsedArgs& args,
   if (command == "chats") {
     allowed_options = {"limit"};
   } else if (command == "messages") {
-    allowed_options = {"chat", "limit", "json"};
+    allowed_options = {"chat", "limit", "csv"};
   } else if (command == "download") {
-    allowed_options = {"chat", "message", "messages", "out"};
-  } else if (command == "upload") {
-    allowed_options = {"chat", "file", "caption", "json"};
+    allowed_options = {"chat", "message", "link", "links"};
   }
 
   for (const auto& option : args.options) {
@@ -194,8 +191,6 @@ int RunCli(int argc, char** argv) {
     ok = RunMessagesCommand(&client, args, &error);
   } else if (command == "download") {
     ok = RunDownloadCommand(&client, args, &error);
-  } else if (command == "upload") {
-    ok = RunUploadCommand(&client, args, &error);
   } else {
     ok = SetError(&error, "未知命令：" + command);
   }

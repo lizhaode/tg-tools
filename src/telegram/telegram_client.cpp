@@ -99,6 +99,27 @@ std::uint64_t TelegramClient::Send(Function function) {
   return request_id;
 }
 
+bool TelegramClient::LoadAllChats(std::string* error) {
+  while (true) {
+    auto result = Request(td_api::make_object<td_api::loadChats>(nullptr, 100),
+                          std::chrono::seconds(60), error, true);
+    if (!result) {
+      return false;
+    }
+    if (result->get_id() == td_api::ok::ID) {
+      continue;
+    }
+    if (result->get_id() == td_api::error::ID) {
+      const auto& td_error = static_cast<const td_api::error&>(*result);
+      if (td_error.code_ == 404) {
+        return true;
+      }
+      return SetError(error, "TDLib error " + std::to_string(td_error.code_) +
+                                 ": " + td_error.message_);
+    }
+  }
+}
+
 bool TelegramClient::ConfigureProxyFromEnvironment(std::string* error) {
   std::optional<ProxyConfig> proxy_config;
   if (!ProxyFromEnvironment(&proxy_config, error)) {
@@ -164,8 +185,8 @@ bool TelegramClient::OnAuthorizationStateUpdate(std::string* error) {
             request->files_directory_ = config_.files_directory;
             request->database_encryption_key_ = config_.database_encryption_key;
             request->use_file_database_ = true;
-            request->use_chat_info_database_ = true;
-            request->use_message_database_ = true;
+            request->use_chat_info_database_ = false;
+            request->use_message_database_ = config_.use_message_database;
             request->use_secret_chats_ = false;
             request->api_id_ = config_.api_id;
             request->api_hash_ = config_.api_hash;

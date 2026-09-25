@@ -20,26 +20,22 @@ namespace {
 
 namespace td_api = td::td_api;
 
-bool WriteMessagesJson(
-    const std::string& path,
-    const std::vector<td_api::object_ptr<td_api::message>>& messages,
-    std::string* error) {
+bool WriteMessagesCsv(const std::string& path,
+                      const std::vector<MessageRow>& rows, std::string* error) {
   std::ofstream output(path);
   if (!output) {
-    return SetError(error, "无法打开 JSON 输出文件：" + path);
+    return SetError(error, "无法打开 CSV 输出文件：" + path);
   }
 
-  output << "[\n";
-  for (std::size_t index = 0; index < messages.size(); ++index) {
-    if (index > 0) {
-      output << ",\n";
-    }
-    WriteMessageJson(output, *messages[index]);
+  output << "message_id,date_text,type,file_id,file_name,mime_type,duration,"
+            "width,height,size_text,supports_streaming,has_stickers,"
+            "alternative_videos,text\n";
+  for (const MessageRow& row : rows) {
+    WriteMessageCsv(output, row);
   }
-  output << "\n]\n";
   output.close();
   if (!output) {
-    return SetError(error, "写入 JSON 输出文件失败：" + path);
+    return SetError(error, "写入 CSV 输出文件失败：" + path);
   }
   return true;
 }
@@ -63,14 +59,18 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
   if (limit && *limit <= 0) {
     return SetError(error, "参数 --limit 必须是正整数");
   }
-  const std::string json_path = ParseStringOption(args, "json", "");
-  const bool write_json = !json_path.empty();
-  std::vector<td_api::object_ptr<td_api::message>> json_messages;
+  const bool has_csv = args.options.find("csv") != args.options.end();
+  const std::string csv_path = ParseStringOption(args, "csv", "");
+  if (has_csv && (csv_path.empty() || csv_path == "true")) {
+    return SetError(error, "参数 --csv 需要一个文件路径");
+  }
+  const bool write_csv = has_csv;
+  std::vector<td_api::object_ptr<td_api::message>> collected;
   std::int64_t from_message_id = 0;
   int printed = 0;
 
-  if (!write_json) {
-    PrintMessageHeader();
+  if (!client->LoadAllChats(error)) {
+    return false;
   }
 
   while (!limit || printed < *limit) {
@@ -82,18 +82,14 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
     if (!result) {
       return false;
     }
-    auto messages = td::move_tl_object_as<td_api::messages>(std::move(result));
-    if (messages->messages_.empty()) {
+    auto batch = td::move_tl_object_as<td_api::messages>(std::move(result));
+    if (batch->messages_.empty()) {
       break;
     }
 
-    for (auto& message : messages->messages_) {
+    for (auto& message : batch->messages_) {
       from_message_id = message->id_;
-      if (write_json) {
-        json_messages.push_back(std::move(message));
-      } else {
-        PrintMessageRow(*message);
-      }
+      collected.push_back(std::move(message));
       ++printed;
       if (limit && printed >= *limit) {
         break;
@@ -101,8 +97,13 @@ bool RunMessagesCommand(TelegramClient* client, const ParsedArgs& args,
     }
   }
 
-  if (write_json) {
-    return WriteMessagesJson(json_path, json_messages, error);
+  const std::vector<MessageRow> rows = DescribeMessages(collected);
+  if (write_csv) {
+    return WriteMessagesCsv(csv_path, rows, error);
+  }
+  PrintMessageHeader();
+  for (const MessageRow& row : rows) {
+    PrintMessageRow(row);
   }
   return true;
 }

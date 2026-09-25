@@ -47,9 +47,9 @@ bool ReadKeyValueFile(const std::filesystem::path& path,
     const std::string key = Trim(line.substr(0, separator));
     if (key != "api_id" && key != "api_hash" && key != "phone_number" &&
         key != "database_directory" && key != "files_directory" &&
-        key != "database_encryption_key" && key != "system_language_code" &&
-        key != "device_model" && key != "system_version" &&
-        key != "application_version") {
+        key != "database_encryption_key" && key != "use_message_database" &&
+        key != "system_language_code" && key != "device_model" &&
+        key != "system_version" && key != "application_version") {
       return SetError(error, "配置文件第 " + std::to_string(line_number) +
                                  " 行包含未知配置项：" + key);
     }
@@ -110,6 +110,18 @@ bool LoadConfig(const std::filesystem::path& path, Config* config,
       MapStringOr(values, "files_directory", config->files_directory);
   config->database_encryption_key = MapStringOr(
       values, "database_encryption_key", config->database_encryption_key);
+  if (const auto iterator = values.find("use_message_database");
+      iterator != values.end() && !iterator->second.empty()) {
+    const std::string value = Trim(iterator->second);
+    if (value == "true" || value == "1") {
+      config->use_message_database = true;
+    } else if (value == "false" || value == "0") {
+      config->use_message_database = false;
+    } else {
+      return SetError(error,
+                      "配置项 use_message_database 必须是 true 或 false");
+    }
+  }
   config->system_language_code =
       MapStringOr(values, "system_language_code", config->system_language_code);
   config->device_model =

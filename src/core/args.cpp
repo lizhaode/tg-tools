@@ -8,7 +8,9 @@ ParsedArgs ParseArgs(int argc, char** argv) {
   ParsedArgs args;
   for (int arg_index = 1; arg_index < argc; ++arg_index) {
     std::string token = argv[arg_index];
-    if (token.rfind("--", 0) == 0) {
+    if (token == "-h") {
+      args.options["help"] = "true";
+    } else if (token.rfind("--", 0) == 0) {
       token = token.substr(2);
       const std::size_t equals_position = token.find('=');
       if (equals_position != std::string::npos) {

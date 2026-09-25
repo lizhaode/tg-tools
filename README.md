@@ -1,6 +1,6 @@
 # tg-tools
 
-tg-tools 支持查看 Telegram 聊天消息、下载消息里的视频，以及将本地视频单个或批量上传到 Telegram。
+tg-tools 支持查看 Telegram 聊天消息，并下载消息里的视频。
 
 ## Quick Start
 
@@ -62,13 +62,9 @@ cp build/tg-tools ~/tg-tools/
 下载视频：
 
 ```bash
-./tg-tools download --chat <chat_id> --message <message_id> --out downloads
-```
-
-上传视频：
-
-```bash
-./tg-tools upload --chat <chat_id> --file downloads/video.mp4 --caption "saved locally"
+./tg-tools download --chat <chat_id> --message <message_id>
+./tg-tools download --link "https://t.me/用户名/消息ID"
+./tg-tools download --links links.txt
 ```
 
 ## 功能详解
@@ -118,7 +114,7 @@ chat_id            type               title
 ### messages
 
 ```bash
-./tg-tools messages --chat <chat_id> [--limit <数量>] [--json <文件>]
+./tg-tools messages --chat <chat_id> [--limit <数量>] [--csv <文件>]
 ```
 
 参数：
@@ -127,7 +123,7 @@ chat_id            type               title
 | --- | --- |
 | `--chat <chat_id>` | 必填；来自 `chats` 输出 |
 | `--limit <数量>` | 最多读取 N 条消息；不指定时默认一直读取到没有更多消息 |
-| `--json <文件>` | 将消息写入 JSON 数组；不指定时命令行输出结果 |
+| `--csv <文件>` | 将消息写入 CSV 文件；不指定时命令行输出结果 |
 
 命令行输出：
 
@@ -136,103 +132,79 @@ chat_id            type               title
 | `message_id` | 消息 ID，下载时通过它指定具体消息 |
 | `date` | 消息时间 |
 | `type` | TDLib 原始类型名，例如 `messageVideo`、`messageText` |
-| `file` | 文件名或文件信息 |
+| `file` | 文件名，视频消息附带时长，如 `video.mp4 (42s)` |
+| `quality` | 视频消息的清晰度与大小，如 `1080p 1.2G, 720p 480M`；第一个是原始版本，后面是服务器提供的备选清晰度；大小未知时显示 `-` |
 | `text` | 消息文本或视频说明 |
 
 命令行输出示例：
 
-| message_id | date | type | file | text |
-| --- | --- | --- | --- | --- |
-| `12345` | `2026-07-28 12:00` | `messageVideo` | `video.mp4` | `caption` |
-| `12346` | `2026-07-28 12:03` | `messageText` | | `hello` |
+| message_id | date | type | file | quality | text |
+| --- | --- | --- | --- | --- | --- |
+| `12345` | `2026-07-28 12:00` | `messageVideo` | `video.mp4 (42s)` | `1080p 1.2G, 720p 480M, 480p 240M` | `caption` |
+| `12346` | `2026-07-28 12:03` | `messageText` | | | `hello` |
 
 示例：
 
 ```bash
 ./tg-tools messages --chat -1001234567890 --limit 50
-./tg-tools messages --chat -1001234567890 --json messages.json
+./tg-tools messages --chat -1001234567890 --csv messages.csv
 ```
 
-`messages --json messages.json` 输出示例：
+`messages --csv messages.csv` 输出示例（表头行）：
 
-```json
-[
-	{
-		"message_id": 12345,
-		"date": 1785235200,
-		"date_text": "2026-07-28 12:00",
-		"type": "messageVideo",
-		"file_id": 654321,
-		"file_name": "video.mp4",
-		"mime_type": "video/mp4",
-		"duration": 42,
-		"width": 1920,
-		"height": 1080,
-		"text": "caption"
-	}
-]
+```text
+message_id,date_text,type,file_id,file_name,mime_type,duration,width,height,size_text,supports_streaming,has_stickers,alternative_videos,text
+12345,2026-07-28 12:00,messageVideo,654321,video.mp4,video/mp4,42,1920,1080,1.2G,true,false,"720p 480M h264",caption
 ```
 
 ### download
 
 ```bash
-./tg-tools download --chat <chat_id> --message <message_id> [--out <路径>]
-./tg-tools download --chat <chat_id> --messages <ID1,ID2,ID3> --out <目录>
+./tg-tools download --chat <chat_id> --message <message_id>
+./tg-tools download --link <消息链接>
+./tg-tools download --links <链接文件>
 ```
 
 参数：
 
 | 参数 | 说明 |
 | --- | --- |
-| `--chat <chat_id>` | 必填；来自 `chats` 输出 |
-| `--message <message_id>` | 下载单条消息中的视频 |
-| `--messages <ID1,ID2,ID3>` | 批量下载多条消息中的视频，多个 ID 用英文逗号分隔 |
-| `--out <路径>` | 输出目录或文件路径；默认是 `downloads` |
+| `--chat <chat_id>` | 来自 `chats` 输出 |
+| `--message <message_id>` | 来自 `messages` 输出 |
+| `--link <消息链接>` | 一条消息链接 |
+| `--links <链接文件>` | 每行一条链接 |
 
-输出路径规则：
+三种用法只能选一种，视频统一输出到
+`downloads` 目录。
 
-- 单条下载时，`--out` 可以是目录，也可以是完整文件路径
-- 批量下载时，`--out` 必须是目录
-- 如果部分消息下载失败，会打印对应的 `message_id`、`file_id` 和失败原因
+消息链接支持：
 
-示例：
+- 公开频道/群：`https://t.me/用户名/消息ID`
+- 私有频道/群：`https://t.me/c/频道内码/消息ID`
 
-```bash
-./tg-tools download --chat -1001234567890 --message 12345 --out downloads
-./tg-tools download --chat -1001234567890 --message 12345 --out downloads/video.mp4
-./tg-tools download --chat -1001234567890 --messages 12345,12346 --out downloads
-```
+链接文件里每行一条链接，空行和 `#` 开头的行
+会被忽略。
 
-### upload
+下载时自动选择最清晰的版本：
+比较原始文件与服务器提供的备选清晰度，
+下载分辨率最高的一个。
 
-```bash
-./tg-tools upload --chat <chat_id> --file <文件> [--caption <文本>]
-./tg-tools upload --chat <chat_id> --json <文件>
-```
+输出规则：
 
-参数：
-
-| 参数 | 说明 |
-| --- | --- |
-| `--chat <chat_id>` | 必填；目标聊天或频道 ID |
-| `--file <文件>` | 上传单个本地视频文件 |
-| `--caption <文本>` | 单个文件的说明文字 |
-| `--json <文件>` | 按 JSON 列表批量上传视频 |
+- 文件名默认使用视频原始文件名
+- 单条下载已存在会覆盖，
+  批量下载会自动加 `-1`、`-2` 后缀
+- 批量下载时单条失败不会中断，
+  结束后统一列出失败链接
+- 同一批里出现同一个视频会直接报错退出，
+  不会下载
 
 示例：
 
 ```bash
-./tg-tools upload --chat -1009876543210 --file downloads/video.mp4 --caption "saved locally"
-./tg-tools upload --chat -1009876543210 --json uploads.json
-```
-
-`upload --json uploads.json` 输入格式如下，`name` 必填，`caption` 可选：
-
-```json
-[
-	{"name": "downloads/a.mp4", "caption": "aaaa"},
-	{"name": "downloads/b.mp4", "caption": "bbbb"}
-]
+./tg-tools download --chat -1001234567890 --message 12345
+./tg-tools download --link "https://t.me/example/123"
+./tg-tools download --links links.txt
 ```
 
 ## 更多帮助
@@ -243,7 +215,6 @@ chat_id            type               title
 ./tg-tools help
 ./tg-tools help messages
 ./tg-tools help download
-./tg-tools help upload
 ```
 
 也可以使用：

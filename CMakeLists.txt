@@ -2,23 +2,11 @@ cmake_minimum_required(VERSION 3.24)
 
 project(tg-tools LANGUAGES CXX)
 
-include(FetchContent)
-
-FetchContent_Declare(
-  nlohmann_json
-  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
-  URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
 add_executable(tg-tools
   src/cli.cpp
   src/commands/chats.cpp
   src/commands/download.cpp
   src/commands/messages.cpp
-  src/commands/upload.cpp
-  src/commands/upload_json.cpp
   src/core/args.cpp
   src/core/config.cpp
   src/core/text_util.cpp
@@ -33,8 +21,12 @@ target_compile_features(tg-tools PRIVATE cxx_std_17)
 target_include_directories(tg-tools PRIVATE src)
 set_target_properties(tg-tools PROPERTIES CXX_EXTENSIONS OFF)
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tdlib")
+  # scripts/build.sh 把 TDLib 安装到 vendor/tdlib，让 CLion 等直接配置也能找到
+  list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/vendor/tdlib")
+endif()
 find_package(Td REQUIRED)
-target_link_libraries(tg-tools PRIVATE Td::TdStatic nlohmann_json::nlohmann_json)
+target_link_libraries(tg-tools PRIVATE Td::TdStatic)
 
 target_compile_options(tg-tools PRIVATE
   -Wall

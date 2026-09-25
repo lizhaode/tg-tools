@@ -13,6 +13,7 @@ struct Config {
   std::string database_directory = "tdlib-db";
   std::string files_directory = "tdlib-files";
   std::string database_encryption_key;
+  bool use_message_database = false;
   std::string system_language_code = "zh-CN";
   std::string device_model = "CLI";
   std::string system_version;

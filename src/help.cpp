@@ -10,12 +10,12 @@ namespace {
 void PrintGeneralHelp() {
   std::cout << R"(tg-tools - Telegram 视频命令行工具
 
-功能：查看 Telegram 聊天消息、下载消息里的视频、上传本地视频，支持批量下载和批量上传。
+功能：查看 Telegram 聊天消息、下载消息里的视频，支持批量下载。
 
 用法：
   ./tg-tools <命令> [选项]
   ./tg-tools help [命令]
-  ./tg-tools <命令> --help
+  ./tg-tools <命令> --help  （或 -h）
 
 配置：
   参考示例配置编写 telegram.conf，并放到二进制程序同级目录。
@@ -24,13 +24,12 @@ void PrintGeneralHelp() {
 命令：
   login      登录 Telegram 账号
   chats      列出聊天，输出 chat_id、类型、标题
-  messages   读取聊天消息，默认表格输出，也可导出 JSON
-  download   下载单条或多条消息中的视频文件
-  upload     上传单个视频，或按 JSON 列表批量上传
+  messages   读取聊天消息，默认表格输出，也可导出 CSV
+  download   下载消息中的视频，支持消息链接和链接文件
 
 每个命令都有独立帮助：
   ./tg-tools help <命令>
-  ./tg-tools <命令> --help
+  ./tg-tools <命令> --help （或 -h）
 )";
 }
 
@@ -63,15 +62,17 @@ bool PrintCommandHelp(const std::string& command) {
     std::cout << R"(messages - 读取聊天消息
 
 功能：
-  读取指定聊天的消息，支持命令行表格输出或 JSON 文件输出。
+  读取指定聊天的消息，支持命令行表格输出或 CSV 文件输出。
+  视频消息的表格 quality 列和 CSV 输出会展示原始及备选清晰度
+  （分辨率、大小、编码），便于下载前查看。
 
 用法：
-  ./tg-tools messages --chat 聊天ID [--limit 数量] [--json 文件]
+  ./tg-tools messages --chat 聊天ID [--limit 数量] [--csv 文件]
 
 参数：
   --chat 聊天ID   必填；来自 chats 输出的 chat_id
   --limit 数量    最多读取 N 条消息；不指定时一直读取到没有更多消息
-  --json 文件     写入 JSON 数组；不指定时命令行输出
+  --csv 文件      写入 CSV 文件；不指定时命令行输出
 )";
     return true;
   }
@@ -80,45 +81,29 @@ bool PrintCommandHelp(const std::string& command) {
     std::cout << R"(download - 下载消息中的视频
 
 功能：
-  下载单条或多条消息中的视频文件。
+  下载单条消息中的视频，或按链接批量下载。
+  自动选择最清晰的版本（原始文件或服务器提供的
+  备选清晰度中分辨率最高的一个）。
+  文件输出到 downloads 目录。
 
 用法：
-  ./tg-tools download --chat 聊天ID --message 消息ID [--out 路径]
-  ./tg-tools download --chat 聊天ID --messages ID1,ID2,ID3 --out 目录
+  ./tg-tools download --chat 聊天ID --message 消息ID
+  ./tg-tools download --link 消息链接
+  ./tg-tools download --links 链接文件
 
 参数：
-  --chat 聊天ID       必填；来自 chats 输出
-  --message 消息ID    下载单条消息中的视频；与 --messages 二选一
-  --messages ID列表   批量下载，多条 ID 用英文逗号分隔
-  --out 路径          输出目录或文件路径；默认 downloads
+  --chat 聊天ID     来自 chats 输出的 chat_id
+  --message 消息ID  来自 messages 输出的 message_id
+  --link 消息链接   例如 t.me/用户名/消息ID
+  --links 链接文件  每行一个消息链接；
+                    空行和 # 开头忽略
 
 要求：
-  单条下载：使用 --message；--out 可以是目录或完整文件路径。
-  批量下载：使用 --messages；--out 必须是目录。
-  下载时会显示进度（每 5% 更新一次）；最多同时下载 3 个视频。
-)";
-    return true;
-  }
-
-  if (command == "upload") {
-    std::cout << R"(upload - 上传视频
-
-功能：
-  上传单个本地视频，或按 JSON 列表批量上传视频。
-
-用法：
-  ./tg-tools upload --chat 聊天ID --file 文件 [--caption 文本]
-  ./tg-tools upload --chat 聊天ID --json 文件
-
-参数：
-  --chat 聊天ID     必填；目标聊天 ID
-  --file 文件       上传单个本地视频文件；与 --json 二选一
-  --caption 文本    单个文件的说明文字
-  --json 文件       批量上传列表，格式为 [{"name":"a.mp4","caption":"说明"}]
-
-要求：
-  --json 文件必须是数组；每个对象的 name 必填，caption 可选。
-  批量上传最多同时处理 3 个视频；每个视频会显示进度并等待最终结果。
+  以上三种用法只能选一种。
+  下载时会显示进度（每 5% 更新一次）；
+  最多同时下载 3 个视频。
+  批量下载时单行失败不会中断，
+  结束后统一列出失败的链接。
 )";
     return true;
   }
@@ -130,7 +115,7 @@ bool PrintCommandHelp(const std::string& command) {
 
 bool IsKnownCommand(const std::string& command) {
   return command == "login" || command == "chats" || command == "messages" ||
-         command == "download" || command == "upload";
+         command == "download";
 }
 
 bool PrintHelp(const std::string& command) {

@@ -3,7 +3,11 @@
 #include <cstddef>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "core/text_util.h"
 
@@ -15,20 +19,10 @@ namespace td_api = td::td_api;
 constexpr std::size_t kMessageIdColumnWidth = 14;
 constexpr std::size_t kDateColumnWidth = 17;
 constexpr std::size_t kTypeColumnWidth = 32;
-constexpr std::size_t kFileColumnWidth = 52;
-constexpr std::size_t kFileClipWidth = 48;
+constexpr std::size_t kFileColumnWidth = 40;
+constexpr std::size_t kQualityColumnWidth = 38;
+constexpr std::size_t kFileClipWidth = 40;
 constexpr std::size_t kTextClipWidth = 120;
-
-struct MessageRow {
-  std::string type;
-  std::string file_name;
-  std::string text;
-  std::string mime_type;
-  std::int32_t file_id = 0;
-  std::int32_t duration = 0;
-  std::int32_t width = 0;
-  std::int32_t height = 0;
-};
 
 // 由 TDLib 生成的 td_api.h 中全部 message* 类型生成，类型名与 ID 一一对应。
 // TDLib 升级后需重新生成；TDLib 未提供只取类型名的轻量接口（to_string 是
@@ -251,6 +245,8 @@ std::string MessageTypeName(const td_api::MessageContent& content) {
 
 MessageRow DescribeMessage(const td_api::message& message) {
   MessageRow row;
+  row.message_id = message.id_;
+  row.date = message.date_;
   row.type = MessageTypeName(*message.content_);
 
   switch (message.content_->get_id()) {
@@ -277,6 +273,21 @@ MessageRow DescribeMessage(const td_api::message& message) {
       row.duration = content.video_->duration_;
       row.width = content.video_->width_;
       row.height = content.video_->height_;
+      row.size = content.video_->video_->size_ > 0
+                     ? content.video_->video_->size_
+                     : content.video_->video_->expected_size_;
+      row.supports_streaming = content.video_->supports_streaming_;
+      row.has_stickers = content.video_->has_stickers_;
+      for (const auto& alternative : content.alternative_videos_) {
+        row.alternative_videos.push_back(AlternativeVideo{
+            alternative->video_->id_, alternative->width_, alternative->height_,
+            alternative->codec_,
+            alternative->video_->size_ > 0
+                ? alternative->video_->size_
+                : alternative->video_->expected_size_,
+            alternative->hls_file_ != nullptr ? alternative->hls_file_->id_
+                                              : 0});
+      }
       if (content.caption_) {
         row.text = content.caption_->text_;
       }
@@ -348,13 +359,35 @@ std::string ChatTypeName(const td_api::chat& chat) {
   }
 }
 
-std::optional<VideoFile> ExtractVideoFile(const td_api::message& message) {
+std::optional<VideoFile> ExtractVideoFile(
+    const td_api::message& message,
+    std::vector<AlternativeVideo>* alternatives) {
   switch (message.content_->get_id()) {
     case td_api::messageVideo::ID: {
       const auto& content =
           static_cast<const td_api::messageVideo&>(*message.content_);
-      return VideoFile{content.video_->video_->id_, content.video_->file_name_,
-                       content.video_->mime_type_};
+      VideoFile video{content.video_->video_->id_,
+                      content.video_->file_name_,
+                      content.video_->mime_type_,
+                      content.video_->width_,
+                      content.video_->height_,
+                      content.video_->video_->size_ > 0
+                          ? content.video_->video_->size_
+                          : content.video_->video_->expected_size_};
+      if (alternatives != nullptr) {
+        alternatives->clear();
+        for (const auto& alternative : content.alternative_videos_) {
+          alternatives->push_back(AlternativeVideo{
+              alternative->video_->id_, alternative->width_,
+              alternative->height_, alternative->codec_,
+              alternative->video_->size_ > 0
+                  ? alternative->video_->size_
+                  : alternative->video_->expected_size_,
+              alternative->hls_file_ != nullptr ? alternative->hls_file_->id_
+                                                : 0});
+        }
+      }
+      return video;
     }
     case td_api::messageVideoNote::ID: {
       const auto& content =
@@ -376,41 +409,136 @@ std::optional<VideoFile> ExtractVideoFile(const td_api::message& message) {
   }
 }
 
+VideoFile SelectBestQuality(const VideoFile& original,
+                            const std::vector<AlternativeVideo>& alternatives) {
+  const AlternativeVideo* best = nullptr;
+  for (const AlternativeVideo& alternative : alternatives) {
+    if (alternative.height <= 0) {
+      continue;
+    }
+    if (best == nullptr || alternative.height > best->height) {
+      best = &alternative;
+    }
+  }
+  if (best == nullptr || best->height <= original.height) {
+    return original;
+  }
+
+  VideoFile selected = original;
+  selected.file_id = best->file_id;
+  selected.width = best->width;
+  selected.height = best->height;
+  selected.size = best->size;
+  const std::filesystem::path path(original.file_name);
+  const std::string stem = path.stem().string();
+  const std::string extension = path.extension().string();
+  selected.file_name =
+      stem + "_" + std::to_string(best->height) + "p" + extension;
+  return selected;
+}
+
+std::vector<std::string> QualityColumnLines(const MessageRow& row) {
+  std::vector<std::string> lines;
+  if (row.width > 0 && row.height > 0) {
+    lines.push_back(std::to_string(row.height) + "p " +
+                    FormatSizeShort(row.size));
+  }
+  for (const AlternativeVideo& alternative : row.alternative_videos) {
+    lines.push_back(std::to_string(alternative.height) + "p " +
+                    FormatSizeShort(alternative.size));
+  }
+  return lines;
+}
+
 void PrintMessageHeader() {
   std::cout << PadLeft("message_id", kMessageIdColumnWidth) << ' '
             << PadRight("date", kDateColumnWidth) << ' '
             << PadRight("type", kTypeColumnWidth) << ' '
-            << PadRight("file", kFileColumnWidth) << " text\n";
+            << PadRight("file", kFileColumnWidth) << ' '
+            << PadRight("quality", kQualityColumnWidth) << " text\n";
 }
 
-void PrintMessageRow(const td_api::message& message) {
-  const MessageRow row = DescribeMessage(message);
-  const std::string file_name = ClipDisplay(row.file_name, kFileClipWidth);
-  std::cout << PadLeft(std::to_string(message.id_), kMessageIdColumnWidth)
-            << ' ' << PadRight(FormatTimestamp(message.date_), kDateColumnWidth)
-            << ' '
-            << PadRight(ClipDisplay(row.type, kTypeColumnWidth),
-                        kTypeColumnWidth)
-            << ' ' << PadRight(file_name, kFileColumnWidth) << ' '
-            << ClipDisplay(row.text, kTextClipWidth) << '\n';
+// 提取媒体组关系：在 album_position 中记录组内序号，caption 保留在原消息
+// 上（组内通常只有最后一条有），不向其他成员复制。
+std::vector<MessageRow> DescribeMessages(
+    const std::vector<td_api::object_ptr<td_api::message>>& messages) {
+  std::vector<MessageRow> rows;
+  rows.reserve(messages.size());
+  std::map<std::int64_t, std::vector<std::size_t>> album_members;
+  for (std::size_t index = 0; index < messages.size(); ++index) {
+    const auto& message = messages[index];
+    rows.push_back(DescribeMessage(*message));
+    if (message->media_album_id_ != 0) {
+      album_members[message->media_album_id_].push_back(index);
+    }
+  }
+  for (const auto& member : album_members) {
+    const std::vector<std::size_t>& indexes = member.second;
+    const std::string size_text = std::to_string(indexes.size());
+    for (std::size_t position = 0; position < indexes.size(); ++position) {
+      rows[indexes[position]].album_position =
+          std::to_string(position + 1) + "/" + size_text;
+    }
+  }
+  return rows;
 }
 
-void WriteMessageJson(std::ostream& output, const td_api::message& message) {
-  const MessageRow row = DescribeMessage(message);
-  output << "  {";
-  output << "\"message_id\":" << message.id_;
-  output << ",\"date\":" << message.date_;
-  output << ",\"date_text\":\"" << JsonEscape(FormatTimestamp(message.date_))
-         << "\"";
-  output << ",\"type\":\"" << JsonEscape(row.type) << "\"";
-  output << ",\"file_id\":" << row.file_id;
-  output << ",\"file_name\":\"" << JsonEscape(row.file_name) << "\"";
-  output << ",\"mime_type\":\"" << JsonEscape(row.mime_type) << "\"";
-  output << ",\"duration\":" << row.duration;
-  output << ",\"width\":" << row.width;
-  output << ",\"height\":" << row.height;
-  output << ",\"text\":\"" << JsonEscape(row.text) << "\"";
-  output << "}";
+void PrintMessageRow(const MessageRow& row) {
+  std::string file_display = row.file_name;
+  if (row.duration > 0) {
+    file_display += " (" + std::to_string(row.duration) + "s)";
+  }
+  if (file_display.empty() && !row.album_position.empty()) {
+    file_display = "组内 " + row.album_position;
+  }
+
+  const std::string prefix =
+      PadLeft(std::to_string(row.message_id), kMessageIdColumnWidth) + ' ' +
+      PadRight(FormatTimestamp(row.date), kDateColumnWidth) + ' ' +
+      PadRight(ClipDisplay(row.type, kTypeColumnWidth), kTypeColumnWidth) +
+      ' ' +
+      PadRight(ClipDisplay(file_display, kFileClipWidth), kFileColumnWidth);
+  const std::vector<std::string> quality_lines = QualityColumnLines(row);
+  const std::string text = ClipDisplay(row.text, kTextClipWidth);
+  const std::string continuation = std::string(DisplayWidth(prefix) + 1, ' ');
+
+  if (quality_lines.empty()) {
+    std::cout << prefix << ' ' << PadRight(std::string(), kQualityColumnWidth)
+              << ' ' << text << '\n';
+    return;
+  }
+  for (std::size_t index = 0; index < quality_lines.size(); ++index) {
+    std::cout << (index == 0 ? prefix : continuation) << ' '
+              << PadRight(
+                     ClipDisplay(quality_lines[index], kQualityColumnWidth),
+                     kQualityColumnWidth);
+    if (index + 1 == quality_lines.size()) {
+      std::cout << ' ' << text;
+    }
+    std::cout << '\n';
+  }
+}
+
+void WriteMessageCsv(std::ostream& output, const MessageRow& row) {
+  std::string alternatives_text;
+  for (const AlternativeVideo& alternative : row.alternative_videos) {
+    if (!alternatives_text.empty()) {
+      alternatives_text += "; ";
+    }
+    alternatives_text += std::to_string(alternative.height) + "p " +
+                         FormatSizeShort(alternative.size);
+    if (!alternative.codec.empty()) {
+      alternatives_text += " " + alternative.codec;
+    }
+  }
+  output << row.message_id << ',' << CsvEscape(FormatTimestamp(row.date)) << ','
+         << CsvEscape(row.type) << ',' << row.file_id << ','
+         << CsvEscape(row.file_name) << ',' << CsvEscape(row.mime_type) << ','
+         << row.duration << ',' << row.width << ',' << row.height << ','
+         << CsvEscape(FormatSizeShort(row.size)) << ','
+         << (row.supports_streaming ? "true" : "false") << ','
+         << (row.has_stickers ? "true" : "false") << ','
+         << CsvEscape(alternatives_text) << ',' << CsvEscape(row.text) << '\n';
 }
 
 std::string SafeFileName(const VideoFile& video, std::int64_t message_id) {

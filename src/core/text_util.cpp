@@ -2,9 +2,7 @@
 
 #include <charconv>
 #include <ctime>
-#include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <system_error>
 #include <utility>
 
@@ -168,6 +166,25 @@ std::string FormatSize(std::int64_t size) {
   return std::to_string(size) + " B";
 }
 
+std::string FormatSizeShort(std::int64_t size) {
+  constexpr std::int64_t ki_b = 1024;
+  constexpr std::int64_t mi_b = 1024 * ki_b;
+  constexpr std::int64_t gi_b = 1024 * mi_b;
+  if (size <= 0) {
+    return "-";
+  }
+  if (size >= gi_b) {
+    return std::to_string(size / gi_b) + "G";
+  }
+  if (size >= mi_b) {
+    return std::to_string(size / mi_b) + "M";
+  }
+  if (size >= ki_b) {
+    return std::to_string(size / ki_b) + "K";
+  }
+  return std::to_string(size) + "B";
+}
+
 std::string OneLine(std::string value) {
   std::string output;
   output.reserve(value.size());
@@ -258,43 +275,28 @@ std::string ClipDisplay(std::string value, std::size_t max_width) {
   return output + marker;
 }
 
-std::string JsonEscape(const std::string& value) {
-  std::ostringstream output;
-  for (const unsigned char character : value) {
-    switch (character) {
-      case '"':
-        output << "\\\"";
-        break;
-      case '\\':
-        output << "\\\\";
-        break;
-      case '\b':
-        output << "\\b";
-        break;
-      case '\f':
-        output << "\\f";
-        break;
-      case '\n':
-        output << "\\n";
-        break;
-      case '\r':
-        output << "\\r";
-        break;
-      case '\t':
-        output << "\\t";
-        break;
-      default:
-        if (character < 0x20) {
-          output << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-                 << static_cast<int>(character) << std::dec
-                 << std::setfill(' ');
-        } else {
-          output << character;
-        }
-        break;
+std::string CsvEscape(const std::string& value) {
+  bool need_quotes = false;
+  for (const char character : value) {
+    if (character == ',' || character == '"' || character == '\n' ||
+        character == '\r') {
+      need_quotes = true;
+      break;
     }
   }
-  return output.str();
+  if (!need_quotes) {
+    return value;
+  }
+  std::string output = "\"";
+  for (const char character : value) {
+    if (character == '"') {
+      output += "\"\"";
+    } else {
+      output += character;
+    }
+  }
+  output += '"';
+  return output;
 }
 
 }  // namespace tg_tools

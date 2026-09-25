@@ -2,3 +2,12 @@
 build/
 Build/
 build-*/
+cmake-build-*/
+
+# IDE
+.idea/
+
+# TDLib local build
+.tdlib-src/
+.local/
+vendor/

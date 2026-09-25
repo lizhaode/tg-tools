@@ -4,11 +4,11 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <set>
-#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -25,39 +25,52 @@ namespace {
 
 namespace td_api = td::td_api;
 
-constexpr int kDownloadParallel = 3;
+constexpr std::size_t kDownloadParallel = 3;
 constexpr std::chrono::minutes kDownloadStallTimeout(10);
-constexpr std::chrono::seconds kDeleteFileTimeout(30);
+constexpr std::chrono::seconds kMessageTimeout(30);
+constexpr std::chrono::seconds kLinkTimeout(60);
+constexpr char kOutputDirectory[] = "downloads";
 
-struct PendingDownload {
-  std::int64_t message_id = 0;
-  std::int32_t file_id = 0;
-  std::filesystem::path destination;
+struct Failure {
+  std::string source;
+  std::string reason;
 };
 
-struct ActiveDownload {
-  PendingDownload pending;
+// 一条待下载视频：解析结果 + 规划出的目标路径 + 下载进度。
+struct DownloadTask {
+  VideoFile video;
+  std::int64_t message_id = 0;
+  std::string source;
+  std::filesystem::path destination;
   std::int64_t downloaded_size = -1;
   int last_reported_percent = 0;
   std::chrono::steady_clock::time_point last_progress_time;
 };
 
-struct DownloadFailure {
+// 一条待解析的消息来源：消息链接，或 chat_id + message_id。
+struct MessageRef {
+  bool is_link = false;
+  std::string link;
+  std::int64_t chat_id = 0;
   std::int64_t message_id = 0;
-  std::int32_t file_id = 0;
-  std::filesystem::path destination;
-  std::string reason;
 };
 
-struct DownloadTask {
-  VideoFile video;
-  PendingDownload pending;
-};
-
-struct PendingDelete {
-  PendingDownload pending;
-  std::chrono::steady_clock::time_point started_at;
-};
+std::optional<VideoFile> SelectBestQualityForMessage(
+    const td_api::message& message) {
+  std::vector<AlternativeVideo> alternatives;
+  std::optional<VideoFile> video = ExtractVideoFile(message, &alternatives);
+  if (!video || alternatives.empty()) {
+    return video;
+  }
+  VideoFile best = SelectBestQuality(*video, alternatives);
+  if (best.file_id == video->file_id) {
+    return video;
+  }
+  std::cerr << "该视频有 " << alternatives.size()
+            << " 个备选清晰度，选用最清晰的 " << best.height
+            << "p 版本（file_id=" << best.file_id << "）\n";
+  return best;
+}
 
 bool PathExists(const std::filesystem::path& path) {
   std::error_code error;
@@ -89,15 +102,6 @@ bool SaveDownloadedFile(const std::filesystem::path& source,
   return true;
 }
 
-std::filesystem::path DownloadDestination(const std::filesystem::path& out,
-                                          const VideoFile& video,
-                                          std::int64_t message_id) {
-  if (out.has_extension()) {
-    return out;
-  }
-  return out / SafeFileName(video, message_id);
-}
-
 std::filesystem::path MakeNumberedPath(const std::filesystem::path& path,
                                        int suffix) {
   const std::filesystem::path parent = path.parent_path();
@@ -123,59 +127,96 @@ std::filesystem::path MakeUniqueBatchDestination(
   return candidate;
 }
 
-std::vector<std::string> SplitCsv(const std::string& value) {
-  std::vector<std::string> items;
-  std::stringstream stream(value);
-  std::string item;
-  while (std::getline(stream, item, ',')) {
-    item = Trim(item);
-    if (!item.empty()) {
-      items.push_back(item);
-    }
+bool ReadLinksFromFile(const std::string& path, std::vector<MessageRef>* refs,
+                       std::string* error) {
+  std::ifstream input(path);
+  if (!input.is_open()) {
+    return SetError(error, "无法打开链接文件：" + path);
   }
-  return items;
-}
 
-bool ParseMessageIds(const std::string& value,
-                     std::vector<std::int64_t>* message_ids,
-                     std::string* error) {
-  if (message_ids == nullptr) {
-    return SetError(error, "内部错误：消息 ID 输出指针为空");
-  }
-  message_ids->clear();
-  for (const std::string& item : SplitCsv(value)) {
-    std::int64_t message_id = 0;
-    if (!ParseInt64Text(item, &message_id)) {
-      return SetError(error, "消息 ID 必须是整数：" + item);
+  std::string line;
+  while (std::getline(input, line)) {
+    const std::string link = Trim(line);
+    if (link.empty() || link.rfind("#", 0) == 0) {
+      continue;
     }
-    message_ids->push_back(message_id);
+    refs->push_back(MessageRef{true, link});
   }
-  if (message_ids->empty()) {
-    return SetError(error, "--messages 至少需要一个消息 ID");
+  if (input.bad()) {
+    return SetError(error, "读取链接文件失败：" + path);
   }
   return true;
 }
 
-void PrintDownloadFailures(const std::vector<DownloadFailure>& failures) {
-  if (failures.empty()) {
-    return;
+std::string RefSource(const MessageRef& ref) {
+  if (ref.is_link) {
+    return ref.link;
   }
-
-  std::cerr << "下载失败：\n";
-  for (const DownloadFailure& failure : failures) {
-    std::cerr << "  message_id=" << failure.message_id
-              << " file_id=" << failure.file_id
-              << " destination=" << OneLine(failure.destination.string())
-              << " reason=" << OneLine(failure.reason) << '\n';
-  }
+  return "chat_id=" + std::to_string(ref.chat_id) +
+         " message_id=" + std::to_string(ref.message_id);
 }
 
-bool ReportDuplicateFileIds(const std::vector<DownloadTask>& videos,
-                            std::string* error) {
+bool ResolveMessageLink(TelegramClient* client, const std::string& link,
+                        td_api::object_ptr<td_api::message>* message,
+                        std::string* reason) {
+  std::string request_error;
+  auto info_object =
+      client->Request(td_api::make_object<td_api::getMessageLinkInfo>(link),
+                      kLinkTimeout, &request_error);
+  if (!info_object) {
+    return SetError(reason, "无法解析该链接：" + OneLine(request_error));
+  }
+
+  auto info =
+      td::move_tl_object_as<td_api::messageLinkInfo>(std::move(info_object));
+  if (!info->message_) {
+    return SetError(reason,
+                    "拿不到消息内容，可能需要先加入"
+                    "该群/频道（chat_id=" +
+                        std::to_string(info->chat_id_) + "）");
+  }
+  *message = std::move(info->message_);
+  return true;
+}
+
+bool ResolveRef(TelegramClient* client, const MessageRef& ref,
+                DownloadTask* resolved, std::string* reason) {
+  const std::string source = RefSource(ref);
+  td_api::object_ptr<td_api::message> message;
+
+  if (ref.is_link) {
+    if (!ResolveMessageLink(client, ref.link, &message, reason)) {
+      return false;
+    }
+  } else {
+    if (!client->LoadAllChats(reason)) {
+      return false;
+    }
+    std::string request_error;
+    auto message_object = client->Request(
+        td_api::make_object<td_api::getMessage>(ref.chat_id, ref.message_id),
+        kMessageTimeout, &request_error);
+    if (!message_object) {
+      return SetError(reason,
+                      "无法读取 " + source + "：" + OneLine(request_error));
+    }
+    message = td::move_tl_object_as<td_api::message>(std::move(message_object));
+  }
+
+  std::optional<VideoFile> video = SelectBestQualityForMessage(*message);
+  if (!video) {
+    return SetError(reason, source + " 的消息里没有可下载的视频");
+  }
+  resolved->video = *video;
+  resolved->message_id = message->id_;
+  resolved->source = source;
+  return true;
+}
+
+bool PlanTasks(std::vector<DownloadTask>* tasks, std::string* error) {
   std::map<std::int32_t, std::vector<std::int64_t>> message_ids_by_file_id;
-  for (const DownloadTask& task : videos) {
-    message_ids_by_file_id[task.video.file_id].push_back(
-        task.pending.message_id);
+  for (const DownloadTask& task : *tasks) {
+    message_ids_by_file_id[task.video.file_id].push_back(task.message_id);
   }
 
   bool has_duplicates = false;
@@ -187,16 +228,43 @@ bool ReportDuplicateFileIds(const std::vector<DownloadTask>& videos,
     std::cerr << "重复视频：file_id=" << item.first << " message_id=";
     for (std::size_t index = 0; index < item.second.size(); ++index) {
       if (index > 0) {
-        std::cerr << ',';
+        std::cerr << ",";
       }
       std::cerr << item.second[index];
     }
-    std::cerr << '\n';
+    std::cerr << "\n";
   }
   if (has_duplicates) {
-    return SetError(error, "下载任务中存在相同视频，请去重后重新执行下载");
+    return SetError(error,
+                    "下载任务中存在相同视频，"
+                    "请去重后重新执行下载");
+  }
+
+  const std::filesystem::path output_directory = kOutputDirectory;
+  // 单条重下覆盖旧文件；批量才启用唯一名，避免同名互相覆盖。
+  const bool unique_names = tasks->size() > 1;
+  std::set<std::filesystem::path> reserved_destinations;
+  for (DownloadTask& task : *tasks) {
+    task.destination =
+        output_directory / SafeFileName(task.video, task.message_id);
+    if (unique_names) {
+      task.destination =
+          MakeUniqueBatchDestination(task.destination, &reserved_destinations);
+    }
   }
   return true;
+}
+
+void PrintFailures(const std::vector<Failure>& failures) {
+  if (failures.empty()) {
+    return;
+  }
+
+  std::cerr << "以下任务处理失败：\n";
+  for (const Failure& failure : failures) {
+    std::cerr << "  " << OneLine(failure.source) << "\n"
+              << "    原因：" << OneLine(failure.reason) << "\n";
+  }
 }
 
 class BatchDownloadRunner {
@@ -205,38 +273,32 @@ class BatchDownloadRunner {
                       const std::vector<DownloadTask>& videos)
       : client_(client), videos_(videos) {}
 
-  bool Run(std::string* error) {
+  bool Run() {
     StartNext();
-    while (!pending_by_file_id_.empty() ||
-           !pending_deletes_by_request_id_.empty() ||
-           next_index_ < videos_.size()) {
+    while (!pending_by_file_id_.empty() || next_index_ < videos_.size()) {
       td::ClientManager::Response response = client_->Receive(10.0);
       if (response.object) {
         ProcessResponse(std::move(response));
       }
       FailStalledDownloads();
-      FailStalledDeletes();
     }
-
-    PrintDownloadFailures(failures_);
-    if (!failures_.empty()) {
-      return SetError(error,
-                      std::to_string(failures_.size()) + " download(s) failed");
-    }
-    return true;
+    return failures_.empty();
   }
+
+  const std::vector<Failure>& failures() const { return failures_; }
 
  private:
   void StartNext() {
-    while (active_ < kDownloadParallel && next_index_ < videos_.size()) {
+    while (pending_by_file_id_.size() < kDownloadParallel &&
+           next_index_ < videos_.size()) {
       const DownloadTask& task = videos_[next_index_];
-      pending_by_file_id_[task.video.file_id] =
-          ActiveDownload{task.pending, -1, 0, std::chrono::steady_clock::now()};
+      DownloadTask& pending = pending_by_file_id_[task.video.file_id];
+      pending = task;
+      pending.last_progress_time = std::chrono::steady_clock::now();
       const std::uint64_t request_id =
           client_->Send(td_api::make_object<td_api::downloadFile>(
               task.video.file_id, 32, 0, 0, false));
       file_id_by_request_id_[request_id] = task.video.file_id;
-      ++active_;
       ++next_index_;
     }
   }
@@ -246,11 +308,8 @@ class BatchDownloadRunner {
     if (pending == pending_by_file_id_.end()) {
       return;
     }
-    failures_.push_back(DownloadFailure{
-        pending->second.pending.message_id, pending->second.pending.file_id,
-        pending->second.pending.destination, reason});
+    failures_.push_back(Failure{pending->second.source, reason});
     pending_by_file_id_.erase(pending);
-    --active_;
     StartNext();
   }
 
@@ -259,7 +318,7 @@ class BatchDownloadRunner {
     if (pending == pending_by_file_id_.end()) {
       return;
     }
-    ActiveDownload& active_download = pending->second;
+    DownloadTask& active_download = pending->second;
     if (file.local_->downloaded_size_ > active_download.downloaded_size) {
       active_download.downloaded_size = file.local_->downloaded_size_;
       active_download.last_progress_time = std::chrono::steady_clock::now();
@@ -269,21 +328,13 @@ class BatchDownloadRunner {
       return;
     }
 
-    if (file.local_->path_.empty() || !PathExists(file.local_->path_)) {
-      failures_.push_back(DownloadFailure{
-          active_download.pending.message_id, file.id_,
-          active_download.pending.destination,
-          "TDLib reported completion but local file is missing"});
-    } else {
-      SaveCompletedFile(file, active_download.pending);
-    }
+    SaveCompletedFile(file, active_download);
 
     pending_by_file_id_.erase(pending);
-    --active_;
     StartNext();
   }
 
-  void ReportProgress(const td_api::file& file, ActiveDownload& download) {
+  void ReportProgress(const td_api::file& file, DownloadTask& download) {
     const std::int64_t total_size =
         file.size_ > 0 ? file.size_ : file.expected_size_;
     if (total_size <= 0) {
@@ -303,62 +354,43 @@ class BatchDownloadRunner {
     }
     download.last_reported_percent = percent;
     std::cout << "下载进度："
-              << OneLine(download.pending.destination.filename().string())
-              << ' ' << percent << "% (" << FormatSize(downloaded_size) << "/"
+              << OneLine(download.destination.filename().string()) << " "
+              << percent << "% (" << FormatSize(downloaded_size) << "/"
               << FormatSize(total_size) << ")\n";
   }
 
-  void SaveCompletedFile(const td_api::file& file,
-                         const PendingDownload& pending) {
+  void SaveCompletedFile(const td_api::file& file, const DownloadTask& task) {
     std::string save_error;
-    if (!SaveDownloadedFile(file.local_->path_, pending.destination,
+    if (!SaveDownloadedFile(file.local_->path_, task.destination,
                             &save_error)) {
-      failures_.push_back(DownloadFailure{pending.message_id, file.id_,
-                                          pending.destination, save_error});
+      failures_.push_back(Failure{task.source, save_error});
       return;
     }
-    std::cout << "已下载：" << OneLine(pending.destination.string()) << '\n';
-    const std::uint64_t request_id =
-        client_->Send(td_api::make_object<td_api::deleteFile>(file.id_));
-    pending_deletes_by_request_id_[request_id] =
-        PendingDelete{pending, std::chrono::steady_clock::now()};
+    std::cout << "已下载：" << OneLine(task.destination.string()) << "\n";
+    // 只为清理 TDLib 缓存，不关心结果。
+    client_->Send(td_api::make_object<td_api::deleteFile>(file.id_));
   }
 
   void FailStalledDownloads() {
     const auto now = std::chrono::steady_clock::now();
     for (auto pending = pending_by_file_id_.begin();
          pending != pending_by_file_id_.end();) {
-      const ActiveDownload& active_download = pending->second;
+      const DownloadTask& active_download = pending->second;
       if (now - active_download.last_progress_time < kDownloadStallTimeout) {
         ++pending;
         continue;
       }
 
-      const std::int32_t file_id = active_download.pending.file_id;
-      const std::string reason =
-          "download stalled for " +
-          std::to_string(kDownloadStallTimeout.count()) +
-          " minutes, downloaded_size=" +
-          std::to_string(active_download.downloaded_size);
+      const std::int32_t file_id = active_download.video.file_id;
+      std::string reason = "下载超时（";
+      reason += std::to_string(kDownloadStallTimeout.count());
+      reason += " 分钟没有进度，已下载 ";
+      reason += FormatSize(active_download.downloaded_size);
+      reason += "）";
       client_->Send(td_api::make_object<td_api::cancelDownloadFile>(
-          active_download.pending.file_id, false));
+          active_download.video.file_id, false));
       ++pending;
       FailDownload(file_id, reason);
-    }
-  }
-
-  void FailStalledDeletes() {
-    const auto now = std::chrono::steady_clock::now();
-    for (auto pending = pending_deletes_by_request_id_.begin();
-         pending != pending_deletes_by_request_id_.end();) {
-      if (now - pending->second.started_at < kDeleteFileTimeout) {
-        ++pending;
-        continue;
-      }
-      std::cerr << "警告：已下载 "
-                << OneLine(pending->second.pending.destination.string())
-                << "，但清理 TDLib 缓存超时\n";
-      pending = pending_deletes_by_request_id_.erase(pending);
     }
   }
 
@@ -377,13 +409,6 @@ class BatchDownloadRunner {
   }
 
   void ProcessRequestResponse(td::ClientManager::Response response) {
-    const auto pending_delete =
-        pending_deletes_by_request_id_.find(response.request_id);
-    if (pending_delete != pending_deletes_by_request_id_.end()) {
-      ProcessDeleteResponse(std::move(response), pending_delete);
-      return;
-    }
-
     const auto request = file_id_by_request_id_.find(response.request_id);
     if (request == file_id_by_request_id_.end()) {
       return;
@@ -393,8 +418,11 @@ class BatchDownloadRunner {
     if (response.object->get_id() == td_api::error::ID) {
       const auto& td_error =
           static_cast<const td_api::error&>(*response.object);
-      FailDownload(file_id, "TDLib error " + std::to_string(td_error.code_) +
-                                ": " + td_error.message_);
+      std::string reason = "TDLib 错误 ";
+      reason += std::to_string(td_error.code_);
+      reason += "：";
+      reason += OneLine(td_error.message_);
+      FailDownload(file_id, reason);
     } else if (response.object->get_id() == td_api::file::ID) {
       const auto& file = static_cast<const td_api::file&>(*response.object);
       FinishFileIfReady(file);
@@ -402,41 +430,49 @@ class BatchDownloadRunner {
     file_id_by_request_id_.erase(request);
   }
 
-  void ProcessDeleteResponse(
-      td::ClientManager::Response response,
-      std::map<std::uint64_t, PendingDelete>::iterator pending_delete) {
-    const PendingDownload pending = pending_delete->second.pending;
-    pending_deletes_by_request_id_.erase(pending_delete);
-
-    if (response.object->get_id() == td_api::ok::ID) {
-      return;
-    }
-    if (response.object->get_id() == td_api::error::ID) {
-      const auto& td_error =
-          static_cast<const td_api::error&>(*response.object);
-      std::cerr << "警告：已下载 " << OneLine(pending.destination.string())
-                << "，但清理 TDLib 缓存失败：" << td_error.message_ << '\n';
-      return;
-    }
-    std::cerr << "警告：已下载 " << OneLine(pending.destination.string())
-              << "，但 TDLib 返回了意外的删除响应\n";
-  }
-
   TelegramClient* client_ = nullptr;
   const std::vector<DownloadTask>& videos_;
-  std::map<std::int32_t, ActiveDownload> pending_by_file_id_;
+  std::map<std::int32_t, DownloadTask> pending_by_file_id_;
   std::map<std::uint64_t, std::int32_t> file_id_by_request_id_;
-  std::map<std::uint64_t, PendingDelete> pending_deletes_by_request_id_;
   std::size_t next_index_ = 0;
-  int active_ = 0;
-  std::vector<DownloadFailure> failures_;
+  std::vector<Failure> failures_;
 };
 
-bool DownloadVideosParallel(TelegramClient* client,
-                            const std::vector<DownloadTask>& videos,
-                            std::string* error) {
-  BatchDownloadRunner runner(client, videos);
-  return runner.Run(error);
+bool ParseDownloadRefs(const ParsedArgs& args, std::vector<MessageRef>* refs,
+                       std::string* error) {
+  const bool has_link = args.options.count("link") > 0;
+  const bool has_links = args.options.count("links") > 0;
+  const bool has_chat = args.options.count("chat") > 0;
+  const bool has_message = args.options.count("message") > 0;
+
+  if (has_link) {
+    MessageRef ref;
+    ref.is_link = true;
+    ref.link = ParseStringOption(args, "link", "");
+    refs->push_back(std::move(ref));
+    return true;
+  }
+
+  if (has_links) {
+    const std::string path = ParseStringOption(args, "links", "");
+    return ReadLinksFromFile(path, refs, error);
+  }
+
+  if (!has_chat && !has_message) {
+    return SetError(error,
+                    "缺少下载参数：请使用 --chat/--message、"
+                    "--link 或 --links");
+  }
+
+  MessageRef ref;
+  if (!ParseInt64Option(args, "chat", &ref.chat_id, error)) {
+    return false;
+  }
+  if (!ParseInt64Option(args, "message", &ref.message_id, error)) {
+    return false;
+  }
+  refs->push_back(std::move(ref));
+  return true;
 }
 
 }  // namespace
@@ -447,92 +483,47 @@ bool RunDownloadCommand(TelegramClient* client, const ParsedArgs& args,
     return SetError(error, "内部错误：Telegram client 为空");
   }
 
-  std::int64_t chat_id = 0;
-  if (!ParseInt64Option(args, "chat", &chat_id, error)) {
+  std::vector<MessageRef> refs;
+  if (!ParseDownloadRefs(args, &refs, error)) {
     return false;
   }
-  const std::filesystem::path out = ParseStringOption(args, "out", "downloads");
-  const std::string messages = ParseStringOption(args, "messages", "");
-  const bool has_message = args.options.find("message") != args.options.end();
-  const bool has_messages = args.options.find("messages") != args.options.end();
 
-  if (has_message && has_messages) {
-    return SetError(error, "--message 和 --messages 只能二选一");
-  }
-
-  if (!messages.empty()) {
-    if (out.has_extension()) {
-      return SetError(error, "使用 --messages 时，--out 必须是目录");
+  std::vector<Failure> failures;
+  std::vector<DownloadTask> tasks;
+  tasks.reserve(refs.size());
+  for (const MessageRef& ref : refs) {
+    DownloadTask task;
+    std::string reason;
+    if (!ResolveRef(client, ref, &task, &reason)) {
+      Failure failure;
+      failure.source = RefSource(ref);
+      failure.reason = reason;
+      failures.push_back(std::move(failure));
+      continue;
     }
-    std::vector<DownloadTask> videos;
-    std::vector<DownloadFailure> failures;
-    std::vector<std::int64_t> message_ids;
-    std::set<std::filesystem::path> reserved_destinations;
-    if (!ParseMessageIds(messages, &message_ids, error)) {
-      return false;
-    }
-    for (const std::int64_t message_id : message_ids) {
-      std::string item_error;
-      auto message_object = client->Request(
-          td_api::make_object<td_api::getMessage>(chat_id, message_id),
-          std::chrono::seconds(30), &item_error);
-      if (!message_object) {
-        failures.push_back(DownloadFailure{message_id, 0, {}, item_error});
-        continue;
-      }
-      auto message =
-          td::move_tl_object_as<td_api::message>(std::move(message_object));
-      std::optional<VideoFile> video = ExtractVideoFile(*message);
-      if (!video) {
-        failures.push_back(
-            DownloadFailure{message_id,
-                            0,
-                            {},
-                            "message does not contain a downloadable video"});
-        continue;
-      }
-      const std::filesystem::path destination = MakeUniqueBatchDestination(
-          out / SafeFileName(*video, message_id), &reserved_destinations);
-      videos.push_back(DownloadTask{
-          *video, PendingDownload{message_id, video->file_id, destination}});
-    }
-    PrintDownloadFailures(failures);
-    if (!ReportDuplicateFileIds(videos, error)) {
-      return false;
-    }
-    if (!DownloadVideosParallel(client, videos, error)) {
-      return false;
-    }
-    if (!failures.empty()) {
-      return SetError(error,
-                      std::to_string(failures.size()) +
-                          " message(s) could not be prepared for download");
-    }
-    return true;
+    tasks.push_back(std::move(task));
   }
 
-  std::int64_t message_id = 0;
-  if (!ParseInt64Option(args, "message", &message_id, error)) {
-    return false;
+  std::string plan_error;
+  if (!PlanTasks(&tasks, &plan_error)) {
+    PrintFailures(failures);
+    return SetError(error, plan_error);
   }
-  auto message_object = client->Request(
-      td_api::make_object<td_api::getMessage>(chat_id, message_id),
-      std::chrono::seconds(30), error);
-  if (!message_object) {
-    return false;
+  if (tasks.empty()) {
+    PrintFailures(failures);
+    return SetError(error, "没有可下载的视频");
   }
-  auto message =
-      td::move_tl_object_as<td_api::message>(std::move(message_object));
-  std::optional<VideoFile> video = ExtractVideoFile(*message);
-  if (!video) {
-    return SetError(error,
-                    "selected message does not contain a downloadable video");
+
+  BatchDownloadRunner runner(client, tasks);
+  runner.Run();
+  failures.insert(failures.end(), runner.failures().begin(),
+                  runner.failures().end());
+  PrintFailures(failures);
+  if (!failures.empty()) {
+    return SetError(
+        error, "有 " + std::to_string(failures.size()) + " 个任务处理失败");
   }
-  std::vector<DownloadTask> videos;
-  videos.push_back(DownloadTask{
-      *video, PendingDownload{message_id, video->file_id,
-                              DownloadDestination(out, *video, message_id)}});
-  return DownloadVideosParallel(client, videos, error);
+  return true;
 }
 
 }  // namespace tg_tools

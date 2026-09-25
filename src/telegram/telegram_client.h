@@ -22,6 +22,7 @@ class TelegramClient {
   ~TelegramClient();
 
   bool EnsureAuthorized(std::string* error);
+  bool LoadAllChats(std::string* error);
   Object Request(Function function, std::chrono::seconds timeout,
                  std::string* error, bool allow_error = false);
   td::ClientManager::Response Receive(double timeout_seconds);
